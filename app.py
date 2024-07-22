@@ -3,9 +3,14 @@ import subprocess
 import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
+import threading
 
 app = Flask(__name__)
 executor = ThreadPoolExecutor(max_workers=10)  # 최대 10개의 작업을 병렬로 실행
+lock = threading.Lock()  # 박스 ID 할당을 위한 락
+
+# 사용 가능한 박스 ID를 관리하는 집합
+available_boxes = set(range(16))
 
 @app.route('/submit', methods=['POST'])
 def submit():
@@ -38,12 +43,18 @@ def execute_code(code, lang, input_data):
         f.write(code)
 
     # Isolate 초기화 및 파일 복사
-    box_id_output = subprocess.check_output(['isolate', '--cg', '--init']).decode().strip()
-    box_id = box_id_output.split('/')[-1]
+    box_id = initialize_isolate_box()
+    #print('##########',box_id,'#############')
+    sys.stdout.flush()
+    if box_id is None:
+        return {'error': 'No available boxes'}
+
+    print(f"Current box_id: {box_id}")  # 현재 실행중인 box_id 출력
     box_path = f'/var/local/lib/isolate/{box_id}/box'
 
     cp_result = subprocess.run(['cp', file_name, box_path], capture_output=True, text=True)
     if cp_result.returncode != 0:
+        cleanup_isolate_box(box_id)
         return {'error': 'File copy failed', 'details': cp_result.stderr}
 
     if input_data:
@@ -53,6 +64,7 @@ def execute_code(code, lang, input_data):
 
         cp_input_result = subprocess.run(['cp', local_input_file, box_path], capture_output=True, text=True)
         if cp_input_result.returncode != 0:
+            cleanup_isolate_box(box_id)
             return {'error': 'Input file copy failed', 'details': cp_input_result.stderr}
 
     # 프로그램 실행 및 메타 정보 수집
@@ -60,21 +72,43 @@ def execute_code(code, lang, input_data):
         result = run_isolate(box_id, ['/usr/bin/python3', f'/box/{file_name}'], input_data)
     elif lang == 'c':
         compile_command = [
-            'isolate', '--cg', '--box-id', box_id, '--time=60', '--mem=64000', '--fsize=2048',
+            'isolate', '--cg', '--box-id', str(box_id), '--time=60', '--mem=64000', '--fsize=2048',
             '--wall-time=30', '--core=0', '--processes=10', '--run', '--', '/usr/bin/gcc',
             '-B', '/usr/bin/', f'/box/{file_name}', '-o', '/box/solution'
         ]
         compile_result = subprocess.run(compile_command, capture_output=True, text=True)
         if compile_result.returncode != 0:
+            cleanup_isolate_box(box_id)
             return {'result': 'Compile Error', 'details': compile_result.stderr}
         result = run_isolate(box_id, ['/box/solution'], input_data)
 
-    subprocess.run(['isolate', '--cg', '--box-id', box_id, '--cleanup'])
+    cleanup_isolate_box(box_id)
     return result
+
+def initialize_isolate_box():
+    with lock:
+        for _ in range(5):  # 최대 5번 재시도
+            try:
+                if available_boxes:
+                    box_id = available_boxes.pop()
+                    subprocess.check_output(['isolate', '--cg', '--box-id', str(box_id), '--init']).decode().strip()
+                    return box_id
+            except subprocess.CalledProcessError as e:
+                print(f"Box initialization failed: {e}")
+                sys.stdout.flush()
+                if box_id in available_boxes:
+                    available_boxes.add(box_id)  # 실패 시 박스 ID 다시 추가
+                continue
+        return None  # 사용 가능한 박스가 없으면 None 반환
+
+def cleanup_isolate_box(box_id):
+    with lock:
+        subprocess.run(['isolate', '--cg', '--box-id', str(box_id), '--cleanup'])
+        available_boxes.add(box_id)
 
 def run_isolate(box_id, command, input_data):
     isolate_command = [
-        'isolate', '--cg', '--box-id', box_id, 
+        'isolate', '--cg', '--box-id', str(box_id), 
         '--time=60', '--mem=64000', '--wall-time=30', '--run', '--meta=/var/local/lib/isolate/{}/meta.txt'.format(box_id), '--'
     ] + command
 
