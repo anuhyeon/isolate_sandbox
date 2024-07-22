@@ -3,6 +3,7 @@ FROM python:3.10-slim
 
 # 필요한 패키지 설치
 RUN apt-get update && apt-get install -y \
+    vim\
     pkg-config \
     gcc \
     make \ 
@@ -20,6 +21,10 @@ RUN git clone https://github.com/ioi/isolate.git && \
 
 # Flask 및 필요한 Python 패키지 설치
 RUN pip3 install flask psutil
+
+# /usr/local/etc/isolate 파일 수정
+RUN sed -i 's/^cg_root = auto:\/run\/isolate\/cgroup/#cg_root = auto:\/run\/isolate\/cgroup/' /usr/local/etc/isolate \
+    && echo 'cg_root = /sys/fs/cgroup' >> /usr/local/etc/isolate
 
 # # isolate 실행에 필요한 권한 설정
 # RUN echo 'ALL ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
@@ -43,5 +48,10 @@ CMD ["python3", "app.py"]
 # 이미지 빌드, 컨테이너 실행 명령어
 # docker build -t judge-server .
 # docker run --name judge-container --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw -d -p 8181:8181 judge-server
-#
+# vim /usr/local/etc/isolate 파일 열고
+# cg_root = auto:/run/isolate/cgroup 이 부분을 주석 처리
+# cg_root = /sys/fs/cgroup 추가
+# 위 내요을 도커파일에 정의하자면 아래와 같음 /usr/local/etc/isolate 파일 수정
+# RUN sed -i 's/^cg_root = auto:\/run\/isolate\/cgroup/#cg_root = auto:\/run\/isolate\/cgroup/' /usr/local/etc/isolate \
+#     && echo 'cg_root = /sys/fs/cgroup' >> /usr/local/etc/isolate
 
