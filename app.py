@@ -8,15 +8,23 @@ app = Flask(__name__)
 @app.route('/submit', methods=['POST'])
 def submit():
     data = request.get_json()
+    print('data\n',data)
+    sys.stdout.flush()
+
     if data is None:
         return jsonify({'error': 'Invalid JSON'}), 400
 
     code = data.get('code')
     lang = data.get('lang')
-    print('-----------------------')
+    input_data = data.get('input','')  # 입력 값을 받아옵니다.
+    print('---------------------------------------------------------------------')
+    print('recieved code')
     print(code)
+    print('recieved lang')
     print(lang)
-    print('-----------------------')
+    print('recieved input')
+    print(input_data)
+    print('---------------------------------------------------------------------')
     sys.stdout.flush()
 
     if not code or not lang:
@@ -37,7 +45,7 @@ def submit():
         f.write(code)
 
     # Isolate 초기화 및 파일 복사
-    box_id_output = subprocess.check_output(['isolate','--cg' ,'--init']).decode().strip()
+    box_id_output = subprocess.check_output(['isolate', '--cg', '--init']).decode().strip()
     box_id = box_id_output.split('/')[-1]
     box_path = f'/var/local/lib/isolate/{box_id}/box'
 
@@ -47,34 +55,53 @@ def submit():
         sys.stdout.flush()
         return jsonify({'error': 'File copy failed', 'details': cp_result.stderr}), 500
 
+    if input_data:
+        # 입력 값을 파일로 저장
+        local_input_file = 'input.txt'
+        with open(local_input_file, 'w') as f:
+            f.write(input_data)
+
+        # 입력 파일을 박스 경로로 복사
+        cp_input_result = subprocess.run(['cp', local_input_file, box_path], capture_output=True, text=True)
+        if cp_input_result.returncode != 0:
+            print(f"Input file copy error: {cp_input_result.stderr}")
+            sys.stdout.flush()
+            return jsonify({'error': 'Input file copy failed', 'details': cp_input_result.stderr}), 500
+
     # 프로그램 실행 및 메타 정보 수집
     result = None
     if lang == 'python':
-        result = run_isolate(box_id, ['/usr/bin/python3', f'/box/{file_name}'])
+        result = run_isolate(box_id, ['/usr/bin/python3', f'/box/{file_name}'], input_data)
     elif lang == 'c':
-        # 샌드박스 내에서 GCC 컴파일러 실행 # -B 옵션 사용: gcc 명령어에 -B 옵션을 사용하여 ld의 경로를 명시적으로 지정 
+        # 샌드박스 내에서 GCC 컴파일러 실행
         compile_command = [
-            'isolate','--cg' , '--box-id', box_id,'--time=60', '--mem=64000', '--fsize=2048',
+            'isolate', '--cg', '--box-id', box_id, '--time=60', '--mem=64000', '--fsize=2048',
             '--wall-time=30', '--core=0', '--processes=10', '--run', '--', '/usr/bin/gcc',
             '-B', '/usr/bin/', f'/box/{file_name}', '-o', '/box/solution'
         ]
         compile_result = subprocess.run(compile_command, capture_output=True, text=True)
         if compile_result.returncode != 0:
             return jsonify({'result': 'Compile Error', 'details': compile_result.stderr})
-        result = run_isolate(box_id, ['/box/solution'])
+        result = run_isolate(box_id, ['/box/solution'], input_data)
     print('before clean --up\n')
-    subprocess.run(['isolate','--cg' , '--box-id', box_id, '--cleanup'])
+    subprocess.run(['isolate', '--cg', '--box-id', box_id, '--cleanup'])
     print('after clean --up \n')
     return jsonify(result)
 
-def run_isolate(box_id, command):
+def run_isolate(box_id, command, input_data):
     # isolate 명령어 실행
-    isolate_command = [
-        'isolate', '--cg' ,'--box-id', box_id, 
-        '--time=60', '--mem=64000', '--wall-time=30', '--run', '--meta=/var/local/lib/isolate/{}/meta.txt'.format(box_id), '--'
-    ] + command
+    if input_data:
+        isolate_command = [
+            'isolate', '--cg', '--box-id', box_id, 
+            '--time=60', '--mem=64000', '--wall-time=30', '--stdin=/box/input.txt', '--run', '--meta=/var/local/lib/isolate/{}/meta.txt'.format(box_id), '--'
+        ] + command
+    else:
+        isolate_command = [
+            'isolate', '--cg', '--box-id', box_id, 
+            '--time=60', '--mem=64000', '--wall-time=30', '--run', '--meta=/var/local/lib/isolate/{}/meta.txt'.format(box_id), '--'
+        ] + command
+    
     process = subprocess.Popen(isolate_command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
     stdout, stderr = process.communicate()
 
     # 메타파일 읽기

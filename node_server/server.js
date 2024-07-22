@@ -7,14 +7,15 @@ app.use(express.urlencoded({ extended: true }));
 
 // 메인 서버에서 채점 서버로 요청을 보내는 엔드포인트
 app.post('/submit', async (req, res) => {
-    const { code, lang } = req.body;
-    console.log(code, lang)
+    const { code, lang, input } = req.body;
+    console.log(code, lang, input)
 
     try {
         // 채점 서버로 코드 제출
         const response = await axios.post('http://192.168.1.18:8181/submit', { 
             code: code,
-            lang: lang
+            lang: lang,
+            input: input
         });
 
         // 채점 결과를 클라이언트에 반환
