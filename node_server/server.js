@@ -1,9 +1,11 @@
 const express = require('express');
 const axios = require('axios');
+const cors = require('cors');
 
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(cors());
 
 // 메인 서버에서 채점 서버로 요청을 보내는 엔드포인트
 app.post('/submit', async (req, res) => {
