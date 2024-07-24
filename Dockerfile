@@ -1,5 +1,6 @@
 # 베이스 이미지 설정
-FROM python:3.10-slim
+FROM --platform=linux/amd64 python:3.9-slim
+#FROM python:3.10-slim
 
 # 필요한 패키지 설치
 RUN apt-get update && apt-get install -y \
@@ -54,4 +55,8 @@ CMD ["python3", "app.py"]
 # 위 내요을 도커파일에 정의하자면 아래와 같음 /usr/local/etc/isolate 파일 수정
 # RUN sed -i 's/^cg_root = auto:\/run\/isolate\/cgroup/#cg_root = auto:\/run\/isolate\/cgroup/' /usr/local/etc/isolate \
 #     && echo 'cg_root = /sys/fs/cgroup' >> /usr/local/etc/isolate
+
+
+
+# 1. docker build -t judge-server .  -> 이미지 빌드 tag:judge-server 
 

@@ -14,7 +14,7 @@ app.post('/submit', async (req, res) => {
 
     try {
         // 채점 서버로 코드 제출
-        const response = await axios.post('http://192.168.1.18:8181/submit', { 
+        const response = await axios.post('http://172.16.151.85:8181/submit', { 
             code: code,
             lang: lang,
             input: input

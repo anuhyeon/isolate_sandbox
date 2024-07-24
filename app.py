@@ -20,18 +20,27 @@ def submit():
 
     code = data.get('code')
     lang = data.get('lang')
-    input_data = data.get('input', '')  # 입력 값을 받아옵니다. 기본값은 빈 문자열
+    bojNumber = data.get('bojNumber')
+    elapsed_time = data.get('elapsed_time', 0)
+    limit_time = data.get('limit_time', 0)
+    test_case = data.get('testCase', [])
 
-    if not code or not lang:
-        return jsonify({'error': 'Missing code or language'}), 400
+    if not code or not lang or not bojNumber or test_case is None:
+        return jsonify({'error': 'Missing required fields'}), 400
+
+    print(f"Received request for bojNumber: {bojNumber}")  # 요청 수신 로그
+    sys.stdout.flush()
 
     # 비동기 실행을 위해 executor에 작업 제출
-    future = executor.submit(execute_code, code, lang, input_data)
+    future = executor.submit(execute_code, code, lang, bojNumber, elapsed_time, limit_time, test_case)
     result = future.result()  # 결과를 기다림
+
+    print(f"Execution result for bojNumber {bojNumber}: {result}")  # 실행 결과 로그
+    sys.stdout.flush()
 
     return jsonify(result)
 
-def execute_code(code, lang, input_data):
+def execute_code(code, lang, bojNumber, elapsed_time, limit_time, test_case):
     if lang == 'python':
         file_name = 'solution.py'
     elif lang == 'c':
@@ -42,14 +51,17 @@ def execute_code(code, lang, input_data):
     with open(file_name, 'w') as f:
         f.write(code)
 
+    print(f"Code written to {file_name} for bojNumber {bojNumber}")  # 코드 작성 로그
+    sys.stdout.flush()
+
     # Isolate 초기화 및 파일 복사
     box_id = initialize_isolate_box()
-    #print('##########',box_id,'#############')
-    sys.stdout.flush()
     if box_id is None:
         return {'error': 'No available boxes'}
 
-    print(f"Current box_id: {box_id}")  # 현재 실행중인 box_id 출력
+    print(f"Initialized isolate box {box_id} for bojNumber {bojNumber}")  # 박스 초기화 로그
+    sys.stdout.flush()
+
     box_path = f'/var/local/lib/isolate/{box_id}/box'
 
     cp_result = subprocess.run(['cp', file_name, box_path], capture_output=True, text=True)
@@ -57,33 +69,69 @@ def execute_code(code, lang, input_data):
         cleanup_isolate_box(box_id)
         return {'error': 'File copy failed', 'details': cp_result.stderr}
 
-    if input_data:
-        local_input_file = 'input.txt'
-        with open(local_input_file, 'w') as f:
-            f.write(input_data)
+    print(f"Copied file to isolate box {box_id} for bojNumber {bojNumber}")  # 파일 복사 로그
+    sys.stdout.flush()
+    
+    if not test_case:  # 테스트 케이스가 빈 경우 기본 실행
+        print(f"No test cases provided, running default execution for bojNumber {bojNumber}")
+        sys.stdout.flush()
+        if lang == 'python':
+            result = run_isolate(box_id, ['/usr/bin/python3', f'/box/{file_name}'], '')
+        elif lang == 'c':
+            compile_command = [
+                'isolate', '--cg', '--box-id', str(box_id), '--time=10', '--mem=64000', '--fsize=2048',
+                '--wall-time=10', '--core=0', '--processes=10', '--run', '--', '/usr/bin/gcc',
+                '-B', '/usr/bin/', f'/box/{file_name}', '-o', '/box/solution'
+            ]
+            compile_result = subprocess.run(compile_command, capture_output=True, text=True)
+            if compile_result.returncode != 0:
+                cleanup_isolate_box(box_id)
+                return {'result': 'Compile Error', 'details': compile_result.stderr}
+            result = run_isolate(box_id, ['/box/solution'], '')
 
-        cp_input_result = subprocess.run(['cp', local_input_file, box_path], capture_output=True, text=True)
-        if cp_input_result.returncode != 0:
-            cleanup_isolate_box(box_id)
-            return {'error': 'Input file copy failed', 'details': cp_input_result.stderr}
+        cleanup_isolate_box(box_id)
+        return {'bojNumber': bojNumber, 'results': result}
 
-    # 프로그램 실행 및 메타 정보 수집
-    if lang == 'python':
-        result = run_isolate(box_id, ['/usr/bin/python3', f'/box/{file_name}'], input_data)
-    elif lang == 'c':
-        compile_command = [
-            'isolate', '--cg', '--box-id', str(box_id), '--time=60', '--mem=64000', '--fsize=2048',
-            '--wall-time=30', '--core=0', '--processes=10', '--run', '--', '/usr/bin/gcc',
-            '-B', '/usr/bin/', f'/box/{file_name}', '-o', '/box/solution'
-        ]
-        compile_result = subprocess.run(compile_command, capture_output=True, text=True)
-        if compile_result.returncode != 0:
-            cleanup_isolate_box(box_id)
-            return {'result': 'Compile Error', 'details': compile_result.stderr}
-        result = run_isolate(box_id, ['/box/solution'], input_data)
+    # test_case 실행 및 결과 수집
+    test_case_results = run_tests(box_id, lang, file_name, test_case, bojNumber)
 
     cleanup_isolate_box(box_id)
-    return result
+    return {'bojNumber': bojNumber, 'results': test_case_results}
+
+def run_tests(box_id, lang, file_name, test_cases, bojNumber):
+    results = []
+
+    for case in test_cases:
+        input_data = case.get('input_case', '')
+        expected_output = str(case.get('output_case')).strip()
+
+        print(f"Running test case with input: {input_data} for bojNumber {bojNumber}")  # 테스트 케이스 실행 로그
+        sys.stdout.flush()
+
+        # 프로그램 실행 및 메타 정보 수집
+        if lang == 'python':
+            result = run_isolate(box_id, ['/usr/bin/python3', f'/box/{file_name}'], input_data)
+        elif lang == 'c':
+            compile_command = [
+                'isolate', '--cg', '--box-id', str(box_id), '--time=10', '--mem=64000', '--fsize=2048',
+                '--wall-time=10', '--core=0', '--processes=10', '--run', '--', '/usr/bin/gcc',
+                '-B', '/usr/bin/', f'/box/{file_name}', '-o', '/box/solution'
+            ]
+            compile_result = subprocess.run(compile_command, capture_output=True, text=True)
+            if compile_result.returncode != 0:
+                cleanup_isolate_box(box_id)
+                return {'result': 'Compile Error', 'details': compile_result.stderr}
+            result = run_isolate(box_id, ['/box/solution'], input_data)
+
+        actual_output = result.get('output', '').strip()
+        result['expected_output'] = expected_output
+        result['correct'] = (expected_output == actual_output)
+        results.append(result)
+
+        print(f"Test case result: {result} for bojNumber {bojNumber}")  # 테스트 케이스 결과 로그
+        sys.stdout.flush()
+
+    return results
 
 def initialize_isolate_box():
     with lock:
@@ -105,11 +153,13 @@ def cleanup_isolate_box(box_id):
     with lock:
         subprocess.run(['isolate', '--cg', '--box-id', str(box_id), '--cleanup'])
         available_boxes.add(box_id)
+        print(f"Cleaned up isolate box {box_id}")  # 박스 정리 로그
+        sys.stdout.flush()
 
 def run_isolate(box_id, command, input_data):
     isolate_command = [
         'isolate', '--cg', '--box-id', str(box_id), 
-        '--time=60', '--mem=64000', '--wall-time=30', '--run', '--meta=/var/local/lib/isolate/{}/meta.txt'.format(box_id), '--'
+        '--time=5', '--mem=64000', '--wall-time=5', '--run', '--meta=/var/local/lib/isolate/{}/meta.txt'.format(box_id), '--'
     ] + command
 
     process = subprocess.Popen(isolate_command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
