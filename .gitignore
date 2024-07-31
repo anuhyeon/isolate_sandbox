@@ -1,2 +1,4 @@
 .venv
 node_server/node_modules
+rabbitMQ/consumer/.venv
+rabbitMQ/producer/node_modules

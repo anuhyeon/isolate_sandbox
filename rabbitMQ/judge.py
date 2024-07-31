@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 import threading
 
 app = Flask(__name__)
-executor = ThreadPoolExecutor(max_workers=15)  # 최대 10개의 작업을 병렬로 실행
+executor = ThreadPoolExecutor(max_workers=10)  # 최대 10개의 작업을 병렬로 실행
 lock = threading.Lock()  # 박스 ID 할당을 위한 락
 
 # 사용 가능한 박스 ID를 관리하는 집합
@@ -79,8 +79,8 @@ def execute_code(code, lang, bojNumber, elapsed_time, limit_time, test_case):
             result = run_isolate(box_id, ['/usr/bin/python3', f'/box/{file_name}'], '')
         elif lang == 'c':
             compile_command = [
-                'isolate', '--cg', '--box-id', str(box_id), '--time=10', '--mem=64000', '--fsize=2048',
-                '--wall-time=10', '--core=0', '--processes=10', '--run', '--', '/usr/bin/gcc',
+                'isolate', '--cg', '--box-id', str(box_id), '--time=60', '--mem=64000', '--fsize=2048',
+                '--wall-time=30', '--core=0', '--processes=10', '--run', '--', '/usr/bin/gcc',
                 '-B', '/usr/bin/', f'/box/{file_name}', '-o', '/box/solution'
             ]
             compile_result = subprocess.run(compile_command, capture_output=True, text=True)
@@ -113,8 +113,8 @@ def run_tests(box_id, lang, file_name, test_cases, bojNumber):
             result = run_isolate(box_id, ['/usr/bin/python3', f'/box/{file_name}'], input_data)
         elif lang == 'c':
             compile_command = [
-                'isolate', '--cg', '--box-id', str(box_id), '--time=10', '--mem=64000', '--fsize=2048',
-                '--wall-time=10', '--core=0', '--processes=10', '--run', '--', '/usr/bin/gcc',
+                'isolate', '--cg', '--box-id', str(box_id), '--time=60', '--mem=64000', '--fsize=2048',
+                '--wall-time=30', '--core=0', '--processes=10', '--run', '--', '/usr/bin/gcc',
                 '-B', '/usr/bin/', f'/box/{file_name}', '-o', '/box/solution'
             ]
             compile_result = subprocess.run(compile_command, capture_output=True, text=True)
@@ -159,7 +159,7 @@ def cleanup_isolate_box(box_id):
 def run_isolate(box_id, command, input_data):
     isolate_command = [
         'isolate', '--cg', '--box-id', str(box_id), 
-        '--time=5', '--mem=64000', '--wall-time=5', '--run', '--meta=/var/local/lib/isolate/{}/meta.txt'.format(box_id), '--'
+        '--time=60', '--mem=64000', '--wall-time=30', '--run', '--meta=/var/local/lib/isolate/{}/meta.txt'.format(box_id), '--'
     ] + command
 
     process = subprocess.Popen(isolate_command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -186,4 +186,4 @@ def parse_meta_file(meta_content):
     return meta_info
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8585)
+    app.run(host='0.0.0.0', port=8181)
